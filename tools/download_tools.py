@@ -74,11 +74,11 @@ class CbrePDFDownloaderTool(BaseTool):
     download_dir: str
 
     def _run(self, report_url: str, parsed_info: dict, base_save_path: str):
-        market = parsed_info['market_name'].replace(' ', '_').replace('/', '_').replace('.', '')
+        market = parsed_info['market_name'].replace('.', '')
         year = parsed_info['year']
         period = parsed_info['period']
         
-        filename = f"{market}_{year}_{period}.pdf"
+        filename = f"{market} {year} {period}.pdf"
         folder_path = os.path.join(base_save_path, str(year), f"{year} {period}")
         final_save_path = os.path.join(folder_path, filename)
 
