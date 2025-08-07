@@ -157,10 +157,18 @@ class Scraper:
         target_period = config.get("target_period")
 
         # --- CORRECTED LOGIC ---
-        # H1 is now treated as equivalent to Q2, and H2 as Q4 for comparison.
-        # This prevents the scraper from stopping on a Q2 report if the target is H1.
-        period_to_value = {"Q1": 1, "Q2": 2, "H1": 2, "Q3": 3, "Q4": 4, "H2": 4}
-        target_value = (target_year * 4 + period_to_value.get(target_period, 0)) if target_year and target_period else None
+        # Convert year/period to a single number for easy comparison.
+        # e.g., Q3 2024 -> 2024*4 + 3 = 8099
+        # e.g., Q2 2024 -> 2024*4 + 2 = 8098
+        period_to_value = {
+            "Q1": 1, "Q2": 2, "H1": 2, "Q3": 3, "Q4": 4, "H2": 4,
+            "YEAR-END": 4, "YE": 4, "FULL-YEAR": 4, "YEAREND": 4, 
+            "year-end": 4, "yearend": 4
+        }
+        target_value = None
+        if target_year:
+            # If no period is given, we treat the target as the very beginning of that year.
+            target_value = (target_year * 4) + period_to_value.get(target_period, 0)
 
         while True:
             print(f"📄 Scraping Page {page_count}...")
@@ -204,12 +212,27 @@ class Scraper:
                             print(f"   ✅ Found matching report: {link_text_raw}")
                             found_reports[href] = link_text_raw
                             
-                        if enable_early_stopping and target_value and report_period and report_year:
-                            found_value = report_year * 4 + period_to_value.get(report_period, 0)
-                            if found_value < target_value:
-                                print(f"   -- Found report from '{report_period} {report_year}', which is older than target. Stopping early.")
-                                should_stop_scraping = True
-                                break
+                        if enable_early_stopping and target_year:
+                        # --- CHANGE #2: A more powerful and flexible regular expression ---
+                            match = re.search(r'(q[1-4]|h[1-2]|year-end|ye|full-year)\s*(\d{4})', link_text_lower)
+                            
+                            if match:
+                                # --- CHANGE #3: Clean up the matched period to match our dictionary ---
+                                report_period_raw = match.group(1)
+                                report_period = report_period_raw.upper().replace('-', '')
+                                report_year = int(match.group(2)) # Note: group index changed to 2
+
+                                # The stopping logic itself is now correct and will be triggered properly.
+                                if target_period and target_value:
+                                    found_value = (report_year * 4) + period_to_value.get(report_period, 0)
+                                    if found_value < target_value:
+                                        print(f"\n   -- Found report from '{report_period_raw} {report_year}', which is older than target. Stopping early. --")
+                                        should_stop_scraping = True
+                                        break
+                                elif report_year < target_year:
+                                    print(f"\n   -- Found report from {report_year}, which is older than target year {target_year}. Stopping early. --")
+                                    should_stop_scraping = True
+                                    break
 
             if should_stop_scraping:
                 break
