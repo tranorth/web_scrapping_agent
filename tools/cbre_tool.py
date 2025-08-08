@@ -1,17 +1,18 @@
 import datetime
+import os
+import traceback
 from typing import Type, Optional, Literal
-from pydantic.v1 import BaseModel, Field
+from pydantic.v1 import BaseModel, Field 
 from langchain.tools import BaseTool
 
 # Your existing, proven components
 from scrapers.web_scraper import Scraper
 from tools.download_tools import CbreTitleParserTool, CbrePDFDownloaderTool
-from utils.file_utils import check_existing_files
+from utils.file_utils import check_existing_files, load_download_log, update_download_log
 
 
 class ReportArchiveInput(BaseModel):
     """Input schema for the CbreReportArchiverTool."""
-    # --- All fields now have defaults for autonomous operation ---
     country: str = Field(
         default="United States",
         description="The country to filter by."
@@ -45,6 +46,7 @@ class CbreReportArchiverTool(BaseTool):
     )
     args_schema: Type[BaseModel] = ReportArchiveInput
 
+    # --- MODIFIED: The complete, updated _run method ---
     def _run(
         self,
         country: str = "United States",
@@ -54,27 +56,28 @@ class CbreReportArchiverTool(BaseTool):
     ) -> str:
         
         BASE_REPORT_PATH = "CBRE_Reports"
-        existing_files = check_existing_files(BASE_REPORT_PATH)
+        if not os.path.exists(BASE_REPORT_PATH):
+            os.makedirs(BASE_REPORT_PATH)
+        LOG_FILE_PATH = os.path.join(BASE_REPORT_PATH, "download_log.json")
+        
         newly_downloaded_files = []
+        failed_downloads = []
+
+        downloaded_urls = load_download_log(LOG_FILE_PATH)
+        print(f"🧠 Found {len(downloaded_urls)} previously downloaded reports in the log.")
 
         scraper = Scraper(headless=True)
-        downloader = CbrePDFDownloaderTool(driver=scraper.driver, download_dir=scraper.download_dir)
-        
         try:
             if not scraper.setup_cbre_insights_page("https://www.cbre.com/insights#market-reports"):
                 return "Error: Could not set up the CBRE insights page."
 
-            # --- This logic is now outside the loop for efficiency ---
             scraper.apply_filter(filter_name="Property Type", filter_value=property_type)
             scraper.apply_filter(filter_name="Country", filter_value=country)
             scraper.sort_results_by("Most Recent")
-            
-            # --- This is the new "smart" configuration ---
-            # If the user gives a specific year and period, we enable early stopping.
-            # Otherwise, we disable it to get ALL reports.
+
             enable_smart_stopping = bool(year)
             search_terms = []
-
+            
             scrape_config = {
                 "content_container_selector": ".coveo-result-list-container",
                 "link_selector": ".coveo-result-list-container a",
@@ -85,45 +88,76 @@ class CbreReportArchiverTool(BaseTool):
                 "target_period": period
             }
             
-            # --- This is your original, complete workflow ---
-            # It now runs with the smart configuration.
             report_urls_with_titles = scraper.extract_links_from_pages(scrape_config)
 
             if not report_urls_with_titles:
-                return "No new reports found matching the criteria on the website."
+                return "No reports found on the website matching the criteria."
+
+            new_reports_to_process = {
+                url: title
+                for url, title in report_urls_with_titles.items()
+                if url not in downloaded_urls
+            }
+
+            if not new_reports_to_process:
+                return "Process complete. No new reports to download."
+
+            print(f"\n--- Found {len(new_reports_to_process)} new reports to process ---")
             
+            titles_to_parse = list(new_reports_to_process.values())
             title_parser = CbreTitleParserTool()
-            parsed_reports_data = title_parser._run(titles=list(report_urls_with_titles.values()))
-            url_map = {title: url for url, title in report_urls_with_titles.items()}
+            parsed_reports_data = title_parser._run(titles=titles_to_parse)
 
-            # New: If a specific period was requested, filter the parsed results
-            reports_to_process = []
-            if period:
-                 reports_to_process = [r for r in parsed_reports_data if r.get('period') == period]
-            else:
-                 reports_to_process = parsed_reports_data
+            url_map = {title: url for url, title in new_reports_to_process.items()}
+            downloader = CbrePDFDownloaderTool(driver=scraper.driver, download_dir=scraper.download_dir)
 
-            for report_data in reports_to_process:
-                market = report_data['market_name'].replace(' ', '_').replace('/', '_').replace('.', '')
-                filename = f"{market}_{report_data['year']}_{report_data['period']}.pdf"
-                
-                if filename in existing_files:
-                    continue
-                
-                report_url = url_map.get(report_data['original_title'])
+            for report_data in parsed_reports_data:
+                report_url = url_map.get(report_data.get('original_title'))
                 if not report_url:
                     continue
 
-                result = downloader._run(report_url=report_url, parsed_info=report_data, base_save_path=BASE_REPORT_PATH)
-                if "Success" in result:
-                    newly_downloaded_files.append(filename)
-            
+                if period and report_data.get('period') != period:
+                    continue
+                
+                status, data = downloader._run(
+                    report_url=report_url, 
+                    parsed_info=report_data, 
+                    base_save_path=BASE_REPORT_PATH
+                )
+
+                if status == "success":
+                    final_filename = data
+                    update_download_log(LOG_FILE_PATH, report_url, final_filename)
+                    newly_downloaded_files.append(final_filename)
+                else:
+                    print(f"      - ❌ Download failed for {report_url}")
+                    failed_downloads.append({"url": report_url, "error": data})
+
+            summary_parts = []
             if newly_downloaded_files:
-                return f"Success! Downloaded {len(newly_downloaded_files)} new reports: {', '.join(sorted(newly_downloaded_files))}"
-            else:
-                return "Process complete. All matching reports are already present."
+                summary_parts.append(f"Successfully downloaded {len(newly_downloaded_files)} new reports: {', '.join(sorted(newly_downloaded_files))}.")
+            
+            if failed_downloads:
+                summary_parts.append(f"Failed to download {len(failed_downloads)} reports.")
+            
+            if not newly_downloaded_files and not failed_downloads:
+                return "Process complete. All matching reports were already downloaded."
+            
+            return " ".join(summary_parts)
 
         except Exception as e:
-            return f"An error occurred: {e}"
+            exc_info = traceback.format_exc()
+            error_message = (
+                f"FATAL: An unexpected error occurred in CbreReportArchiverTool._run (cbre_tool.py).\n"
+                f"Error: {e}\n\n"
+                f"This error was not handled by the tool's internal logic and points to a potential bug.\n\n"
+                f"Full Traceback:\n{exc_info}"
+            )
+            print(error_message)
+            return error_message
         finally:
             scraper.close()
+
+
+
+

@@ -8,7 +8,16 @@ def create_cbre_agent():
     """Builds and returns the CBRE report archiving agent."""
 
     llm = ChatVertexAI(model="gemini-2.5-pro", temperature=0)
-    tools = [CbreReportArchiverTool()]
+    cbre_tool = CbreReportArchiverTool(
+        name="cbre_report_archiver",
+        description=(
+            "Searches for and archives CBRE market reports. "
+            "If the user's request is broad or does not specify filters like country, "
+            "property type, year, or period, this tool MUST be called with its "
+            "default parameters to perform a general search."
+        )
+    )
+    tools = [cbre_tool]
 
     # We are providing a custom system prompt to control the agent's behavior.
     prompt = ChatPromptTemplate.from_messages([

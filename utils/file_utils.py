@@ -1,4 +1,5 @@
 import os
+import json
 
 def check_existing_files(root_dir):
     """
@@ -22,3 +23,28 @@ def check_existing_files(root_dir):
                 
     print(f"Found {len(existing_files)} existing PDF reports in '{root_dir}'.")
     return existing_files
+
+def load_download_log(log_path):
+    """Loads the download log file and returns a set of URLs."""
+    if not os.path.exists(log_path):
+        return set()
+    with open(log_path, 'r') as f:
+        # We only need the keys (the URLs) for our check
+        data = json.load(f)
+        return set(data.keys())
+
+def update_download_log(log_path, url, final_filename):
+    """Updates the download log with a new URL and filename."""
+    data = {}
+    if os.path.exists(log_path):
+        with open(log_path, 'r') as f:
+            try:
+                data = json.load(f)
+            except json.JSONDecodeError:
+                # File is empty or corrupt, start fresh
+                pass
+    
+    data[url] = final_filename
+    
+    with open(log_path, 'w') as f:
+        json.dump(data, f, indent=4)

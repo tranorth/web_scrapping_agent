@@ -6,7 +6,8 @@ import glob
 import shutil
 import time
 import requests
-from typing import Type, Any, List, Dict
+import traceback
+from typing import Type, Any, List, Dict, Tuple
 from pydantic.v1 import BaseModel, Field
 from langchain.tools import BaseTool
 from langchain_google_vertexai import ChatVertexAI
@@ -73,10 +74,20 @@ class CbrePDFDownloaderTool(BaseTool):
     driver: Any
     download_dir: str
 
-    def _run(self, report_url: str, parsed_info: dict, base_save_path: str):
-        market = parsed_info['market_name'].replace('.', '')
-        year = parsed_info['year']
-        period = parsed_info['period']
+    def _run(self, report_url: str, parsed_info: dict, base_save_path: str) -> Tuple[str, str]:
+        # Safely get parsed info with defaults to prevent errors from bad parses
+        raw_market_name = parsed_info.get('market_name', 'Unknown Market').strip()
+        year = parsed_info.get('year', 'Unknown Year').strip()
+        period = parsed_info.get('period', 'Unknown Period').strip()
+
+        # Sanitize the market name to remove characters invalid in file paths
+        invalid_chars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
+        sanitized_market_name = raw_market_name
+        for char in invalid_chars:
+            # --- MODIFIED: Replaced hyphen with a space ---
+            sanitized_market_name = sanitized_market_name.replace(char, ' ') 
+        
+        market = sanitized_market_name if sanitized_market_name else "Unknown Market"
         
         filename = f"{market} {year} {period}.pdf"
         folder_path = os.path.join(base_save_path, str(year), f"{year} {period}")
@@ -113,12 +124,23 @@ class CbrePDFDownloaderTool(BaseTool):
                     # 5. Create final destination folder and move the file
                     os.makedirs(folder_path, exist_ok=True)
                     shutil.move(downloaded_pdf, final_save_path)
+
+                    # Print the detailed success message for the console log
+                    print(f"   ✓ Success: Moved and saved '{filename}' to '{folder_path}'")
                     
-                    return f"Success: Moved and saved '{filename}'"
+                    # Return a tuple: ("success", "the_filename.pdf")
+                    return "success", filename
                 else: # No files found yet
                     time.sleep(1)
                     download_wait_time += 1
-            return f"Error: Download timed out for {report_url}"
+            return "error", f"Download timed out for {report_url}"
 
         except Exception as e:
-            return f"Error downloading from {report_url}: {e}"
+            exc_info = traceback.format_exc()
+            error_message = (
+                f"Exception in CbrePDFDownloaderTool._run (download_tools.py)\n"
+                f"URL: {report_url}\n"
+                f"Details: {e}\n\nTraceback:\n{exc_info}"
+            )
+            # Return a tuple: ("error", "The detailed error message")
+            return "error", error_message
