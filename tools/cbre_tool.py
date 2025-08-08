@@ -8,7 +8,7 @@ from langchain.tools import BaseTool
 # Your existing, proven components
 from scrapers.web_scraper import Scraper
 from tools.download_tools import CbreTitleParserTool, CbrePDFDownloaderTool
-from utils.file_utils import check_existing_files, load_download_log, update_download_log, load_failed_log, update_failed_log
+from utils.file_utils import check_existing_files, load_download_log, update_download_log, load_failed_log, update_failed_log, load_irrelevant_log, update_irrelevant_log
 
 # Get the directory of the current script (e.g., .../your_project/tools)
 TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -67,6 +67,7 @@ class CbreReportArchiverTool(BaseTool):
 
         SUCCESS_LOG_PATH = os.path.join(BASE_REPORT_PATH, "download_log.json")
         FAILED_LOG_PATH = os.path.join(BASE_REPORT_PATH, "failed_log.json")
+        IRRELEVANT_LOG_PATH = os.path.join(BASE_REPORT_PATH, "irrelevant_log.json")
         
         newly_downloaded_files = []
         failed_downloads = []
@@ -74,8 +75,9 @@ class CbreReportArchiverTool(BaseTool):
 
         successful_urls = load_download_log(SUCCESS_LOG_PATH)
         failed_urls = set(load_failed_log(FAILED_LOG_PATH).keys())
-        urls_to_ignore = successful_urls.union(failed_urls)
-        print(f"🧠 Found {len(successful_urls)} successful and {len(failed_urls)} failed reports in logs. They will be skipped.")
+        irrelevant_urls = load_irrelevant_log(IRRELEVANT_LOG_PATH)
+        urls_to_ignore = successful_urls.union(failed_urls, irrelevant_urls)
+        print(f"🧠 Found {len(successful_urls)} successful, {len(failed_urls)} failed, and {len(irrelevant_urls)} irrelevant reports in logs. They will be skipped.")
 
         scraper = Scraper(headless=True)
         try:

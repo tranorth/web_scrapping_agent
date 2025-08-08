@@ -66,4 +66,26 @@ def update_failed_log(log_path, url, reason):
     with open(log_path, 'w') as f:
         json.dump(data, f, indent=4)
 
+def load_irrelevant_log(log_path):
+    """Loads the irrelevant log file and returns a set of URLs."""
+    if not os.path.exists(log_path):
+        return set()
+    with open(log_path, 'r') as f:
+        try:
+            data = json.load(f)
+            return set(data.keys()) # We only need the URLs
+        except json.JSONDecodeError:
+            return set()
 
+def update_irrelevant_log(log_path, url, reason="Marked as irrelevant by user"):
+    """Updates the irrelevant log with a new URL."""
+    data = {}
+    if os.path.exists(log_path):
+        with open(log_path, 'r') as f:
+            try:
+                data = json.load(f)
+            except json.JSONDecodeError:
+                pass
+    data[url] = reason
+    with open(log_path, 'w') as f:
+        json.dump(data, f, indent=4)
