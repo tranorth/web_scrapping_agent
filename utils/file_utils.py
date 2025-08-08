@@ -48,3 +48,22 @@ def update_download_log(log_path, url, final_filename):
     
     with open(log_path, 'w') as f:
         json.dump(data, f, indent=4)
+
+def load_failed_log(log_path):
+    """Loads the failed log file and returns a dictionary of {url: reason}."""
+    if not os.path.exists(log_path):
+        return {}
+    with open(log_path, 'r') as f:
+        try:
+            return json.load(f)
+        except json.JSONDecodeError:
+            return {}
+
+def update_failed_log(log_path, url, reason):
+    """Updates the failed log with a new URL and failure reason."""
+    data = load_failed_log(log_path)
+    data[url] = str(reason) # Ensure reason is a string
+    with open(log_path, 'w') as f:
+        json.dump(data, f, indent=4)
+
+

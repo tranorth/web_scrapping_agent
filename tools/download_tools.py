@@ -75,72 +75,65 @@ class CbrePDFDownloaderTool(BaseTool):
     download_dir: str
 
     def _run(self, report_url: str, parsed_info: dict, base_save_path: str) -> Tuple[str, str]:
-        # Safely get parsed info with defaults to prevent errors from bad parses
-        raw_market_name = parsed_info.get('market_name', 'Unknown Market').strip()
-        year = parsed_info.get('year', 'Unknown Year').strip()
-        period = parsed_info.get('period', 'Unknown Period').strip()
-
-        # Sanitize the market name to remove characters invalid in file paths
-        invalid_chars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
-        sanitized_market_name = raw_market_name
-        for char in invalid_chars:
-            # --- MODIFIED: Replaced hyphen with a space ---
-            sanitized_market_name = sanitized_market_name.replace(char, ' ') 
-        
-        market = sanitized_market_name if sanitized_market_name else "Unknown Market"
-        
-        filename = f"{market} {year} {period}.pdf"
-        folder_path = os.path.join(base_save_path, str(year), f"{year} {period}")
-        final_save_path = os.path.join(folder_path, filename)
-
         try:
-            # 1. Navigate to the page
+            # --- Step 1: Download the file to a temporary location FIRST ---
             self.driver.get(report_url)
             download_element = WebDriverWait(self.driver, 20).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "a.cbre-c-download"))
             )
-            
-            # 2. Clear the temp download folder before clicking
             for f in os.listdir(self.download_dir):
                 os.remove(os.path.join(self.download_dir, f))
-
-            # 3. Click the link to trigger the automatic download
             download_element.click()
 
-            # 4. Wait for the download to complete
-            # This loop waits until the .crdownload file is gone and the .pdf is present
+            downloaded_pdf_path = None
             download_wait_time = 0
-            while download_wait_time < 30: # 30-second timeout
-                # Search for files with .crdownload (in-progress) or .pdf extensions
-                downloaded_files = glob.glob(os.path.join(self.download_dir, '*.*'))
-                if any('.crdownload' in f for f in downloaded_files):
-                    time.sleep(1)
-                    download_wait_time += 1
-                elif any('.pdf' in f for f in downloaded_files):
-                    # Find the downloaded PDF
-                    downloaded_pdf = [f for f in downloaded_files if f.endswith('.pdf')][0]
-                    print(f"✓ Download complete: {os.path.basename(downloaded_pdf)}")
-                    
-                    # 5. Create final destination folder and move the file
-                    os.makedirs(folder_path, exist_ok=True)
-                    shutil.move(downloaded_pdf, final_save_path)
+            while download_wait_time < 30:
+                if temp_path := next((os.path.join(self.download_dir, f) for f in os.listdir(self.download_dir) if f.endswith('.pdf')), None):
+                    downloaded_pdf_path = temp_path
+                    break  # Exit loop once PDF is found
+                time.sleep(1)
+                download_wait_time += 1
 
-                    # Print the detailed success message for the console log
-                    print(f"   ✓ Success: Moved and saved '{filename}' to '{folder_path}'")
-                    
-                    # Return a tuple: ("success", "the_filename.pdf")
-                    return "success", filename
-                else: # No files found yet
-                    time.sleep(1)
-                    download_wait_time += 1
-            return "error", f"Download timed out for {report_url}"
+            if not downloaded_pdf_path:
+                return "error", f"Download timed out for {report_url}"
+
+            # --- Step 2: Now that the file is downloaded, try to process and move it ---
+            raw_market_name = parsed_info.get('market_name', '').strip()
+            year = parsed_info.get('year', '').strip()
+            period = parsed_info.get('period', '').strip()
+
+            # Check if the AI parsing was successful
+            if not all([raw_market_name, year, period]):
+                # This is a "partial success". The file is downloaded but can't be organized.
+                failed_folder = os.path.join(base_save_path, "failed_downloads", "Parsing_Error")
+                os.makedirs(failed_folder, exist_ok=True)
+                failed_filename = os.path.basename(downloaded_pdf_path)
+                shutil.move(downloaded_pdf_path, os.path.join(failed_folder, failed_filename))
+                message = f"File '{failed_filename}' downloaded but couldn't be organized. Moved to '{failed_folder}' for manual review."
+                return "partial_success", message
+
+            # --- This part only runs if parsing was successful ---
+            invalid_chars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
+            sanitized_market_name = raw_market_name
+            for char in invalid_chars:
+                sanitized_market_name = sanitized_market_name.replace(char, ' ')
+
+            market = sanitized_market_name
+            filename = f"{market} {year} {period}.pdf"
+            folder_path = os.path.join(base_save_path, str(year), f"{year} {period}")
+            final_save_path = os.path.join(folder_path, filename)
+
+            os.makedirs(folder_path, exist_ok=True)
+            shutil.move(downloaded_pdf_path, final_save_path)
+            print(f"   ✓ Success: Moved and saved '{filename}' to '{folder_path}'")
+            return "success", filename
 
         except Exception as e:
+            # This will catch any other unexpected error during the process
             exc_info = traceback.format_exc()
             error_message = (
-                f"Exception in CbrePDFDownloaderTool._run (download_tools.py)\n"
+                f"An unexpected exception occurred in CbrePDFDownloaderTool._run.\n"
                 f"URL: {report_url}\n"
                 f"Details: {e}\n\nTraceback:\n{exc_info}"
             )
-            # Return a tuple: ("error", "The detailed error message")
             return "error", error_message

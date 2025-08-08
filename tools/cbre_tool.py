@@ -8,7 +8,14 @@ from langchain.tools import BaseTool
 # Your existing, proven components
 from scrapers.web_scraper import Scraper
 from tools.download_tools import CbreTitleParserTool, CbrePDFDownloaderTool
-from utils.file_utils import check_existing_files, load_download_log, update_download_log
+from utils.file_utils import check_existing_files, load_download_log, update_download_log, load_failed_log, update_failed_log
+
+# Get the directory of the current script (e.g., .../your_project/tools)
+TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
+# Go up one level to the project's root directory
+PROJECT_ROOT = os.path.dirname(TOOL_DIR)
+# Define the base path relative to the project root. This is now always correct.
+BASE_REPORT_PATH = os.path.join(PROJECT_ROOT, "CBRE_Reports")
 
 
 class ReportArchiveInput(BaseModel):
@@ -46,7 +53,7 @@ class CbreReportArchiverTool(BaseTool):
     )
     args_schema: Type[BaseModel] = ReportArchiveInput
 
-    # --- MODIFIED: The complete, updated _run method ---
+    
     def _run(
         self,
         country: str = "United States",
@@ -55,16 +62,20 @@ class CbreReportArchiverTool(BaseTool):
         period: Optional[str] = None,
     ) -> str:
         
-        BASE_REPORT_PATH = "CBRE_Reports"
         if not os.path.exists(BASE_REPORT_PATH):
             os.makedirs(BASE_REPORT_PATH)
-        LOG_FILE_PATH = os.path.join(BASE_REPORT_PATH, "download_log.json")
+
+        SUCCESS_LOG_PATH = os.path.join(BASE_REPORT_PATH, "download_log.json")
+        FAILED_LOG_PATH = os.path.join(BASE_REPORT_PATH, "failed_log.json")
         
         newly_downloaded_files = []
         failed_downloads = []
+        partially_downloaded_files = []
 
-        downloaded_urls = load_download_log(LOG_FILE_PATH)
-        print(f"🧠 Found {len(downloaded_urls)} previously downloaded reports in the log.")
+        successful_urls = load_download_log(SUCCESS_LOG_PATH)
+        failed_urls = set(load_failed_log(FAILED_LOG_PATH).keys())
+        urls_to_ignore = successful_urls.union(failed_urls)
+        print(f"🧠 Found {len(successful_urls)} successful and {len(failed_urls)} failed reports in logs. They will be skipped.")
 
         scraper = Scraper(headless=True)
         try:
@@ -96,7 +107,7 @@ class CbreReportArchiverTool(BaseTool):
             new_reports_to_process = {
                 url: title
                 for url, title in report_urls_with_titles.items()
-                if url not in downloaded_urls
+                if url not in urls_to_ignore
             }
 
             if not new_reports_to_process:
@@ -127,21 +138,29 @@ class CbreReportArchiverTool(BaseTool):
 
                 if status == "success":
                     final_filename = data
-                    update_download_log(LOG_FILE_PATH, report_url, final_filename)
+                    update_download_log(SUCCESS_LOG_PATH, report_url, final_filename)
                     newly_downloaded_files.append(final_filename)
-                else:
+                elif status == "partial_success":
+                    print(f"      - ⚠️  {data}")
+                    partially_downloaded_files.append(data)
+                    update_failed_log(FAILED_LOG_PATH, report_url, "Partial Success - Parsing/Organizing Failed")
+                else: # status == "error"
                     print(f"      - ❌ Download failed for {report_url}")
                     failed_downloads.append({"url": report_url, "error": data})
+                    update_failed_log(FAILED_LOG_PATH, report_url, data)
 
             summary_parts = []
             if newly_downloaded_files:
-                summary_parts.append(f"Successfully downloaded {len(newly_downloaded_files)} new reports: {', '.join(sorted(newly_downloaded_files))}.")
+                summary_parts.append(f"Successfully downloaded and organized {len(newly_downloaded_files)} new reports.")
+            
+            if partially_downloaded_files:
+                summary_parts.append(f"{len(partially_downloaded_files)} reports were downloaded but could not be organized. They have been moved to the 'CBRE_Reports/failed_downloads' folder for your manual review.")
             
             if failed_downloads:
-                summary_parts.append(f"Failed to download {len(failed_downloads)} reports.")
+                summary_parts.append(f"Failed to download {len(failed_downloads)} reports entirely.")
             
-            if not newly_downloaded_files and not failed_downloads:
-                return "Process complete. All matching reports were already downloaded."
+            if not summary_parts:
+                return "Process complete. No new reports to download."
             
             return " ".join(summary_parts)
 

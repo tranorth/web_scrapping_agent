@@ -27,6 +27,11 @@ def create_cbre_agent():
             "Your primary goal is to use the available tools to fulfill the user's request. "
             "Do not make assumptions or question the user's input, such as the requested year. "
             "Trust the user and execute the tool call if possible."
+            "After the tool runs, it will return a summary of what happened. "
+            "Your job is to clearly report this summary back to the user. "
+            "If the summary mentions successful downloads, partial successes (files moved to a failed folder), or that there are no new reports to download, your task is complete. "
+            "**Do not run the tool again in the same turn.** Only report the outcome."
+            "ONLY RUN TOOL ONCE. DO NOT RERUN TOOL AUTOMATICALLY"
         ),
         MessagesPlaceholder(variable_name="agent_scratchpad"),
         ("human", "{input}"),
