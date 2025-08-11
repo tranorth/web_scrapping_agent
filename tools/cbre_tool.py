@@ -1,7 +1,6 @@
 # tools/cbre_tool.py
 
 # Import standard Python libraries for handling dates, files, and errors.
-import datetime
 import os
 import traceback
 # Import typing utilities for defining data structures and types.
@@ -12,10 +11,10 @@ from pydantic.v1 import BaseModel, Field
 from langchain.tools import BaseTool
 
 # Import our custom-built modules.
-from scrapers.web_scraper import Scraper  # The Selenium scraper for interacting with the website.
+from scrapers.cbre_scraper import CbreScraper  # The Selenium scraper for interacting with the website.
 from tools.download_tools import CbreTitleParserTool, CbrePDFDownloaderTool # The sub-tools for parsing titles and downloading files.
 # Import all the utility functions for reading and writing to our log files.
-from utils.file_utils import check_existing_files, load_download_log, update_download_log, load_failed_log, update_failed_log, load_irrelevant_log, update_irrelevant_log
+from utils.file_utils import load_download_log, update_download_log, load_failed_log, update_failed_log, load_irrelevant_log
 
 # --- Robust Path Definition ---
 # This section ensures that the 'CBRE_Reports' folder is always created in the
@@ -107,7 +106,7 @@ class CbreReportArchiverTool(BaseTool):
 
         # --- 2. Web Scraping ---
 
-        scraper = Scraper(headless=True)
+        scraper = CbreScraper(headless=True)
         # A `try...finally` block ensures that the browser is always closed, even if errors occur.
         try:
             # Prepare the website for scraping (accept cookies, switch to iframe, etc.).
