@@ -58,7 +58,7 @@ class CbreTitleParserTool(BaseTool):
         """The main execution logic for the title parser."""
         print(f"\n🧠 Sending {len(titles)} titles to the AI for parsing in a single batch...")
         # Initialize the Gemini LLM.
-        llm = ChatVertexAI(model="gemini-1.5-pro-preview-0409", temperature=0)
+        llm = ChatVertexAI(model="gemini-2.5-pro", temperature=0)
         # Configure the LLM to return output that is guaranteed to match the 'ReportInfoList' schema.
         structured_llm = llm.with_structured_output(ReportInfoList)
         # Format the list of titles into a numbered string to include in the prompt.

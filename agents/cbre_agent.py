@@ -20,7 +20,7 @@ def create_cbre_agent():
     # 1. Initialize the Language Model (LLM)
     # This creates an instance of Google's Gemini model.
     # temperature=0 makes the model's responses deterministic and less random.
-    llm = ChatVertexAI(model="gemini-1.5-pro-preview-0409", temperature=0)
+    llm = ChatVertexAI(model="gemini-2.5-pro", temperature=0)
 
     # 2. Initialize the Custom Tool
     # This creates an instance of our report archiver tool. The `name` and `description`
